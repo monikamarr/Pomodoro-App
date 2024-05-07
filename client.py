@@ -3,6 +3,7 @@ from tkinter import ttk, simpledialog, PhotoImage, messagebox
 import time
 import zmq
 
+
 class PomodoroTimer(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -12,10 +13,24 @@ class PomodoroTimer(tk.Tk):
 
         # Setup ZeroMQ for communication
         self.context = zmq.Context()
+
+        # communicating with task_service.py
         self.task_socket = self.context.socket(zmq.REQ)
         self.task_socket.connect("tcp://localhost:5558")
 
-        self.durations = {'pomodoro': 1500, 'short_break': 300, 'long_break': 900}
+        # Setup ZeroMQ for communication with the timer service
+        self.timer_socket = self.context.socket(zmq.REQ)
+        self.timer_socket.connect("tcp://localhost:5555")
+
+        # Setup ZeroMQ for communication with the settings service
+        self.settings_socket = self.context.socket(zmq.REQ)
+        self.settings_socket.connect("tcp://localhost:5556")
+
+        # Setup ZeroMQ for communication with the breaks service
+        self.breaks_socket = self.context.socket(zmq.REQ)
+        self.breaks_socket.connect("tcp://localhost:5557")
+
+        self.durations = self.get_settings()
         self.current_timer = 'pomodoro'
         self.remaining_time = self.durations[self.current_timer]
         self.running = False
@@ -65,11 +80,10 @@ class PomodoroTimer(tk.Tk):
         mode_frame = ttk.Frame(self)
         mode_frame.pack(pady=10)
         for mode in ['pomodoro', 'short_break', 'long_break']:
-            ttk.Button(mode_frame, text=mode.capitalize(), command=lambda m=mode: self.switch_mode(m)).pack(side=tk.LEFT)
+            ttk.Button(mode_frame, text=mode.capitalize(),
+                       command=lambda m=mode: self.switch_mode(m)).pack(side=tk.LEFT)
 
-        # -----------------------------------------------------------
-        # TASK MANAGEMENT
-        # -----------------------------------------------------------
+
         # Task List Frame
         self.task_frame = ttk.Frame(self)
         self.task_frame.pack(fill=tk.BOTH, expand=True)
@@ -82,6 +96,17 @@ class PomodoroTimer(tk.Tk):
         self.add_task_button.pack()
         self.refresh_tasks()
 
+    def send_request(self, socket, action, data):
+        message = {'action': action, **data}
+        print(f"Sending: {message}")
+        socket.send_json(message)
+        response = socket.recv_json()
+        print(f"Received: {response}")
+        return response
+
+    # -----------------------------------------------------------
+    # TASKS MANAGEMENT
+    # -----------------------------------------------------------
     def refresh_tasks(self):
         for widget in self.task_frame.winfo_children():
             widget.destroy()
@@ -89,13 +114,34 @@ class PomodoroTimer(tk.Tk):
         for i, task in enumerate(self.tasks):
             self.create_task_widget(i, task)
 
-
     def add_task(self):
         task_description = self.task_entry.get()
         if task_description:
-            self.tasks.append({"description": task_description, "completed": False})
-            self.task_entry.delete(0, tk.END)
-            self.refresh_tasks()
+            # Send the new task to the task service
+            response = self.send_request(self.task_socket, 'add', {'description': task_description})
+            if response.get('status') == 'success':
+                self.tasks.append({"description": task_description, "completed": False})
+                self.task_entry.delete(0, tk.END)
+                self.refresh_tasks()
+
+    def delete_task(self, index):
+        if 0 <= index < len(self.tasks):
+            response = self.send_request(self.task_socket, 'delete', {'index': index})
+            if response.get('status') == 'success':
+                del self.tasks[index]
+                self.refresh_tasks()
+            else:
+                print("Failed to delete task: ", response.get('message'))
+        else:
+            print("Invalid task index")
+
+    def toggle_task(self, index, var):
+        task = self.tasks[index]
+        task['completed'] = var.get()
+        # Send the update request to the task service
+        self.send_request(self.task_socket, 'update_task',
+                          {'description': task['description'], 'completed': task['completed']})
+        self.refresh_tasks()
 
     def create_task_widget(self, index, task):
         task_frame = ttk.Frame(self.task_frame, style='TaskFrame.TFrame')
@@ -122,103 +168,148 @@ class PomodoroTimer(tk.Tk):
         delete_button.pack(side=tk.RIGHT, anchor='e')
 
     def edit_task(self, index):
-        new_description = simpledialog.askstring("Edit Task", "Edit the task description:", initialvalue=self.tasks[index]['description'])
-        if new_description:
-            self.tasks[index]['description'] = new_description
-            self.refresh_tasks()
+        current_description = self.tasks[index]['description']
+        new_description = simpledialog.askstring("Edit Task", "Edit the task description:",
+                                                 initialvalue=current_description)
+        if new_description and new_description != current_description:
+            response = self.send_request(self.task_socket, 'edit', {'index': index, 'description': new_description})
+            if response.get('status') == 'success':
+                self.tasks[index]['description'] = new_description
+                self.refresh_tasks()
+            else:
+                messagebox.showerror("Error", f"Failed to update task: {response.get('message')}")
 
-    def delete_task(self, index):
-        del self.tasks[index]
-        self.refresh_tasks()
-    def toggle_task(self, index, var):
-        self.tasks[index]['completed'] = var.get()
-        self.refresh_tasks()
 
     def confirm_delete_task(self, index):
-        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this task?"):
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this task? This cannot be undone!"):
             self.delete_task(index)
-
-    # Send a request to the server via ZeroMQ
-    def send_request(self, socket, action, data):
-        socket.send_json({'action': action, **data})
-        return socket.recv_json()
 
     # -----------------------------------------------------------
     # SETTINGS SERVICE
     # -----------------------------------------------------------
     def open_settings(self):
-        settings_window = tk.Toplevel(self)
-        settings_window.title("Timer Settings")
-        settings_window.geometry("250x150")
-        settings_window.configure(background='#F5DAD2')
+        response = self.send_request(self.settings_socket, "get_settings", {})
+        if response.get('status') == 'success':
+            settings = response['settings']
+            settings_window = tk.Toplevel(self)
+            settings_window.title("Timer Settings")
+            settings_window.geometry("250x150")
+            settings_window.configure(background='#F5DAD2')
 
-        row = 0
-        entries = {}
-        for mode, seconds in self.durations.items():
-            label = ttk.Label(settings_window, text=f"{mode.capitalize()} duration (minutes):")
-            label.grid(row=row, column=0, padx=10, pady=5)
-            entry = ttk.Entry(settings_window, width=5)
-            entry.insert(0, seconds // 60)
-            entry.grid(row=row, column=1, padx=5)
-            entries[mode] = entry
-            row += 1
+            row = 0
+            entries = {}
+            for mode, seconds in settings.items():
+                label = ttk.Label(settings_window, text=f"{mode.capitalize()} duration (minutes):")
+                label.grid(row=row, column=0, padx=10, pady=5)
+                entry = ttk.Entry(settings_window, width=5)
+                entry.insert(0, seconds // 60)
+                entry.grid(row=row, column=1, padx=5)
+                entries[mode] = entry
+                row += 1
 
-        def save_settings():
-            for mode, entry in entries.items():
-                self.durations[mode] = int(entry.get()) * 60
-                if self.current_timer == mode:  # Update current timer if its duration was changed
-                    self.switch_mode(mode)
-            settings_window.destroy()
+            def save_settings():
+                new_settings = {mode: int(entry.get()) * 60 for mode, entry in entries.items()}
+                # Send updated settings back to the server for storage
+                update_response = self.send_request(self.settings_socket, "update_settings", {"settings": new_settings})
+                if update_response.get('status') == 'Settings updated':
+                    for mode in new_settings:
+                        self.durations[mode] = new_settings[mode]
+                    settings_window.destroy()
+                else:
+                    messagebox.showerror("Error", update_response.get('message'))
 
-        save_button = ttk.Button(settings_window, text="Save", command=save_settings)
-        save_button.grid(row=row, column=0, columnspan=2, pady=10)
+            save_button = ttk.Button(settings_window, text="Save", command=save_settings)
+            save_button.grid(row=row, column=0, columnspan=2, pady=10)
+        else:
+            messagebox.showerror("Error", response.get('message'))
+
+    def get_settings(self):
+        # Example of a synchronous call to fetch settings
+        response = self.send_request(self.settings_socket, "get_settings", {})
+        if response.get('status') == 'success':
+            return response['settings']
+        else:
+            # Handle failure: either return default settings or raise an exception
+            return {'pomodoro': 1500, 'short_break': 300, 'long_break': 900}
 
     # -----------------------------------------------------------
     # TIMER AND BREAKS SERVICES
     # -----------------------------------------------------------
+
     def start_or_pause_timer(self):
+        print("Start or pause timer method called")
         if not self.running:
-            self.start_timer()
+            print("Timer not running. Starting timer...")
+            response = self.send_request(self.timer_socket, 'start', {'duration': self.durations[self.current_timer]})
+            if response.get('status') == 'success':
+                self.running = True
+                self.paused = False
+                self.control_button.config(text="Pause")
+                self.remaining_time = self.durations[self.current_timer]
+                self.timer_display.config(text=self.format_time(self.remaining_time))
+                self.update_timer()  # This would now request time updates from the service
+            else:
+                print("Failed to start timer:", response.get('message'))
+                messagebox.showerror("Timer Error", response.get('message'))
         elif self.paused:
+            print("Timer paused. Resuming timer...")
             self.resume_timer()
         else:
+            print("Timer running. Pausing timer...")
             self.pause_timer()
 
     def start_timer(self):
-        self.running = True
-        self.paused = False
-        self.start_time = time.time()
-        self.update_timer()
-        self.control_button.config(text="Pause")
+        if not self.running:
+            response = self.send_request(self.timer_socket, 'start', {'duration': self.durations[self.current_timer]})
+            if response.get('status') == 'success':
+                self.running = True
+                self.paused = False
+                self.start_time = time.time()
+                self.update_timer()
+                self.control_button.config(text="Pause")
+                print("Timer started successfully")
+            else:
+                print(f"Failed to start timer: {response.get('message')}")
+                messagebox.showerror("Timer Error", response.get('message'))
+        else:
+            print("Attempt to start timer while it is already running")
 
     def pause_timer(self):
-        self.paused = True
-        self.control_button.config(text="Resume")
+        if self.running and not self.paused:
+            response = self.send_request(self.timer_socket, 'pause', {})
+            if response.get('status') == 'success':
+                self.paused = True
+                self.control_button.config(text="Resume")
 
     def resume_timer(self):
-        if not self.running:
-            return
-        self.paused = False
-        self.start_time = time.time() - (self.durations[self.current_timer] - self.remaining_time)
-        self.update_timer()
-        self.control_button.config(text="Pause")
+        if self.paused:
+            response = self.send_request(self.timer_socket, 'resume', {})
+            if response.get('status') == 'success':
+                self.paused = False
+                self.control_button.config(text="Pause")
+                self.update_timer()
 
     def update_timer(self):
         if self.running and not self.paused:
-            elapsed = time.time() - self.start_time
-            self.remaining_time = max(0, self.durations[self.current_timer] - int(elapsed))
-            self.timer_display.config(text=self.format_time(self.remaining_time))
-            if self.remaining_time > 0:
-                self.after(1000, self.update_timer)
-            else:
-                self.reset_timer()
+            response = self.send_request(self.timer_socket, 'check', {})
+            if response.get('status') == 'success':
+                if response['running']:
+                    self.remaining_time = response['elapsed']
+                    self.timer_display.config(text=self.format_time(self.remaining_time))
+                    self.paused = response.get('paused', False)
+                    if not self.paused:
+                        self.after(1000, self.update_timer)
+                else:
+                    self.reset_timer()
 
     def reset_timer(self):
-        self.running = False
-        self.paused = False
-        self.remaining_time = self.durations[self.current_timer]
-        self.timer_display.config(text=self.format_time(self.remaining_time))
-        self.control_button.config(text="Start")
+        response = self.send_request(self.timer_socket, 'reset', {})
+        if response.get('status') == 'success':
+            self.running = False
+            self.paused = False
+            self.remaining_time = self.durations[self.current_timer]
+            self.timer_display.config(text=self.format_time(self.remaining_time))
+            self.control_button.config(text="Start")
 
     def switch_mode(self, mode):
         if self.running:
@@ -230,7 +321,33 @@ class PomodoroTimer(tk.Tk):
     def format_time(self, seconds):
         return f"{seconds // 60:02}:{seconds % 60:02}"
 
+    def start_break(self, break_type):
+        if self.running:
+            messagebox.showinfo("Timer Running", "Stop the main timer before starting a break.")
+            return
+        response = self.send_request(self.breaks_socket, "start_break", {"break_type": break_type})
+        if response.get('status') == 'success':
+            messagebox.showinfo("Break Complete", f"{break_type.capitalize()} break is complete!")
+        else:
+            messagebox.showerror("Error", response.get('message'))
 
+    def get_break_duration(self, break_type):
+        response = self.send_request(self.breaks_socket, "get_duration", {"break_type": break_type})
+        if response.get('status') == 'success':
+            return response['duration']
+        else:
+            messagebox.showerror("Error",
+                                 f"Failed to get duration for {break_type}: {response.get('message', 'No details provided')}")
+            return None  # Or handle the error differently
+
+    def set_break_duration(self, break_type, duration):
+        response = self.send_request(self.breaks_socket, "set_duration",
+                                     {"break_type": break_type, "duration": duration})
+        if response.get('status') == 'Duration Updated':
+            messagebox.showinfo("Duration Updated", f"{break_type.capitalize()} break duration updated successfully!")
+        else:
+            messagebox.showerror("Update Error",
+                                 f"Failed to update duration for {break_type}: {response.get('message', 'No details provided')}")
 
 
 if __name__ == "__main__":
