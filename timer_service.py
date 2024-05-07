@@ -1,38 +1,70 @@
 import zmq
 import time
 
+
 def main():
     context = zmq.Context()
-    socket = context.socket(zmq.REP)  # Consider using ROUTER for handling multiple clients
-    socket.bind("tcp://*:5555")
+    socket = context.socket(zmq.REP)
+    socket.bind("tcp://*:5555")  # Binding to port 5555 for timer service
 
-    timers = {}  # Dictionary to manage multiple timers
+    running = False
+    paused = False
+    start_time = 0
+    remaining_time = 0
 
     while True:
         message = socket.recv_json()
-        client_id = message.get('client_id', 'default_client')
         action = message['action']
 
         if action == 'start':
-            duration = message.get('duration', 1500)  # Default 25 minutes
-            timers[client_id] = {
-                'start_time': time.perf_counter(),
-                'duration': duration,
-                'running': True
-            }
-            socket.send_json({'status': 'Timer started'})
-        elif action == 'check':
-            if client_id in timers and timers[client_id]['running']:
-                elapsed = time.perf_counter() - timers[client_id]['start_time']
-                running = elapsed < timers[client_id]['duration']
-                elapsed = min(elapsed, timers[client_id]['duration'])
-                socket.send_json({'elapsed': elapsed, 'running': running})
+            if not running:
+                duration = message['duration']
+                running = True
+                paused = False
+                start_time = time.time()
+                remaining_time = duration
+                response = {'status': 'success', 'message': 'Timer started'}
             else:
-                socket.send_json({'elapsed': 0, 'running': False})
-        elif action == 'stop':
-            if client_id in timers:
-                timers[client_id]['running'] = False
-            socket.send_json({'status': 'Timer stopped'})
+                response = {'status': 'error', 'message': 'Timer already running'}
+
+        elif action == 'pause':
+            if running and not paused:
+                paused = True
+                response = {'status': 'success', 'message': 'Timer paused'}
+            else:
+                response = {'status': 'error', 'message': 'Timer not running or already paused'}
+
+        elif action == 'resume':
+            if running and paused:
+                paused = False
+                elapsed = time.time() - start_time
+                remaining_time -= int(elapsed)
+                start_time = time.time()
+                response = {'status': 'success', 'message': 'Timer resumed'}
+            else:
+                response = {'status': 'error', 'message': 'Timer not paused or not running'}
+
+        elif action == 'check':
+            if running:
+                elapsed = time.time() - start_time
+                remaining_time = max(0, remaining_time - int(elapsed))
+                response = {'running': True, 'elapsed': remaining_time, 'status': 'success'}
+            else:
+                response = {'running': False, 'paused': paused, 'status': 'success'}
+
+        elif action == 'reset':
+            if running:
+                running = False
+                paused = False
+                start_time = 0
+                remaining_time = 0
+                response = {'status': 'success', 'message': 'Timer reset'}
+            else:
+                response = {'status': 'error', 'message': 'Timer was not running'}
+
+        # Send response after processing the action
+        socket.send_json(response)
+
 
 if __name__ == "__main__":
     main()
