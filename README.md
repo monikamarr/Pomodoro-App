@@ -43,30 +43,4 @@ def read_response():
 ```
 
 ### C. UML Sequence Diagram
-┌──────────────┐            ┌──────────────┐            ┌──────────────┐            ┌───────────────┐
-│    Client    │            │  File System │            │ Microservice │            │   Random Word │
-└─────┬────────┘            └──────┬───────┘            └───────┬──────┘            │     API       │
-      │                             │                           │                   └──────┬────────┘
-      │ Write "RANDOM_WORD" to      │                           │                           │
-      │ request.txt                 │                           │                           │
-      ├────────────────────────────>│                           │                           │
-      │                             │                           │                           │
-      │                             │                           │                           │
-      │                             │ Read request.txt          │                           │
-      │                             ├──────────────────────────>│                           │
-      │                             │                           │                           │
-      │                             │                           │ Send request to API       │
-      │                             │                           ├─────────────────────────> │
-      │                             │                           │                           │
-      │                             │                           │ Receive random word       │
-      │                             │                           │< ─────────────────────────┤
-      │                             │                           │                           │
-      │                             │                           │ Write response to         │
-      │                             │                           │ response.txt              │
-      │                             │<──────────────────────────┤                           │
-      │ Read response.txt           │                           │                           │
-      ├────────────────────────────>│                           │                           │
-      │                             │                           │                           │
-      │ Process response            │                           │                           │
-      │<────────────────────────────┤                           │                           │
-      │                             │                           │                           │
+![UML Sequence Diagram](uml.jpeg)
