@@ -41,6 +41,6 @@ def read_response():
         response = file.read().strip()
     return response
 ```
-
+s
 ### C. UML Sequence Diagram
-![UML Sequence Diagram](uml.jpeg)
+![UML Sequence Diagram](diagram.png)
