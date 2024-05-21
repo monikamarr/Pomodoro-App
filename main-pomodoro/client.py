@@ -1,18 +1,27 @@
+import json
 import tkinter as tk
 from tkinter import ttk, simpledialog, PhotoImage, messagebox
 import time
 import zmq
+import threading
 
 
 class PomodoroTimer(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.task_frame = None
+        self.external_service_button = None
         self.title("Pomodoro App")
         self.geometry("300x500")
         self.configure(bg='#BACD92')
+        self.info_text = ""
 
         # Setup ZeroMQ for communication
         self.context = zmq.Context()
+
+        # communicating with Karen's microservice A
+        self.external_service_socket = self.context.socket(zmq.REQ)
+        self.external_service_socket.connect("tcp://localhost:5560")
 
         # communicating with task_service.py
         self.task_socket = self.context.socket(zmq.REQ)
@@ -63,6 +72,19 @@ class PomodoroTimer(tk.Tk):
         # Style for labels (consider using a different style name if applied only to specific labels)
         style.configure('TLabel', background='#F5DAD2', foreground='#75A47F', font=('Helvetica', 14))
 
+        # Style for the info button
+
+        style.configure('InfoButton.TButton', background='#75A47F', foreground='white',
+                        font=('Arial', 12, 'bold'), width=2)
+
+    # calling on Karen's microservice A
+    # def call_external_service(self, type, size):
+    #     """Call the external service with a type and size and return the response."""
+    #     req = json.dumps({"type": type, "size": size})
+    #     self.external_service_socket.send_string(req)
+    #     res = self.external_service_socket.recv_string()
+    #     return res
+
     def setup_ui(self):
         # Settings button in the top-right corner
         self.settings_button = ttk.Button(self, text='⚙ Settings', command=self.open_settings)
@@ -83,7 +105,6 @@ class PomodoroTimer(tk.Tk):
             ttk.Button(mode_frame, text=mode.capitalize(),
                        command=lambda m=mode: self.switch_mode(m)).pack(side=tk.LEFT)
 
-
         # Task List Frame
         self.task_frame = ttk.Frame(self)
         self.task_frame.pack(fill=tk.BOTH, expand=True)
@@ -96,6 +117,45 @@ class PomodoroTimer(tk.Tk):
         self.add_task_button.pack()
         self.refresh_tasks()
 
+        # setting info button in lower right corner
+        self.info_button = ttk.Button(self, text="ⓘ", style='InfoButton.TButton', command=self.fetch_info)
+        # Pack the info button in the lower right corner
+        self.info_button.pack(side='right', anchor='se', padx=10, pady=10)
+
+        # Info button setup
+
+       # self.info_button.pack(side='bottom', anchor='se', padx=10, pady=10)
+
+    # popup window
+    def fetch_info(self):
+        # Assuming request_info method updates a variable self.info_text with the fetched information
+        threading.Thread(target=self.request_info, daemon=True).start()
+        self.after(100, self.open_info_window)  # Open window after a short delay to ensure data is fetched
+
+    def open_info_window(self):
+        info_window = tk.Toplevel(self)
+        info_window.title("Information")
+        info_window.geometry("400x300")  # Adjust size as needed
+        info_window.configure(bg='#F5DAD2')  # Set the background color of the window
+
+        # Create a scrollbar
+        scrollbar = ttk.Scrollbar(info_window)
+        scrollbar.pack(side='right', fill='y')
+
+        # Create a Text widget with a Scrollbar and custom colors
+        text_widget = tk.Text(info_window, wrap='word', yscrollcommand=scrollbar.set,
+                              bg='#F5DAD2', fg='#75A47F',  # Light pink background with green text
+                              borderwidth=0,
+                              highlightthickness=0)  # Remove border to avoid any default background peeking through
+        text_widget.pack(expand=True, fill='both', padx=10, pady=10)
+        text_widget.config(state='normal')  # Ensure the widget is in a normal state when inserting text
+        text_widget.delete('1.0', 'end')  # Clear existing text
+        text_widget.insert('end', self.info_text)  # Insert text into the Text widget
+        text_widget.config(state='disabled')  # Disable editing of the text widget
+
+        # Configure the scrollbar to scroll the Text widget
+        scrollbar.config(command=text_widget.yview)
+
     def send_request(self, socket, action, data):
         message = {'action': action, **data}
         print(f"Sending: {message}")
@@ -103,6 +163,36 @@ class PomodoroTimer(tk.Tk):
         response = socket.recv_json()
         print(f"Received: {response}")
         return response
+
+    def request_info(self):
+        try:
+            context = zmq.Context()
+            socket = context.socket(zmq.REQ)
+            socket.connect("tcp://localhost:5560")
+
+            requests = [
+                {"type": "infoPom", "size": "small"},
+                {"type": "infoPom", "size": "medium"},
+                {"type": "infoPom", "size": "large"},
+                {"type": "aboutPom", "size": "small"},
+                {"type": "aboutPom", "size": "medium"},
+                {"type": "aboutPom", "size": "large"}
+            ]
+
+            combined_response = ""
+            for req in requests:
+                socket.send_string(json.dumps(req))
+                response = socket.recv_string()
+                combined_response += response + "\n\n" + "-" * 50 + "\n\n"  # Adding a line after each response
+
+            # Schedule update to `info_text` on the main thread
+            self.after(0, lambda: setattr(self, 'info_text', combined_response.strip()))
+        except Exception as e:
+            print("Error during request:", e)
+            self.after(0, lambda: setattr(self, 'info_text', "Error fetching data"))
+        finally:
+            socket.close()
+            context.term()
 
     # -----------------------------------------------------------
     # TASKS MANAGEMENT
@@ -178,7 +268,6 @@ class PomodoroTimer(tk.Tk):
                 self.refresh_tasks()
             else:
                 messagebox.showerror("Error", f"Failed to update task: {response.get('message')}")
-
 
     def confirm_delete_task(self, index):
         if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this task? This cannot be undone!"):
