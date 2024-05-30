@@ -3,25 +3,20 @@ import requests
 
 # connect to api
 RANDOM_WORD_API_URL = "https://random-word-api.herokuapp.com/word?length=5"
-generated_word = None
+
 # this will help with the request.txt having the stuff in it
 last_processed_request = None
 
 
 def get_word():
-    global generated_word
-    # if nothing got generated yet
-    if generated_word is None:
-        response = requests.get(RANDOM_WORD_API_URL)
-        # if successful
-        if response.status_code == 200:
-            # grab the first word from the response
-            generated_word = response.json()[0]
-            print(f"Generated word: {generated_word}")
-            return generated_word
-        return "ERROR getting the word! :("
-    else:
+    response = requests.get(RANDOM_WORD_API_URL)
+    # if successful
+    if response.status_code == 200:
+        # grab the first word from the response
+        generated_word = response.json()[0]
+        print(f"Generated word: {generated_word}")
         return generated_word
+    return "ERROR getting the word! :("
 
 
 def read_request():
@@ -38,7 +33,7 @@ def write_response(response):
 
 
 def handle_request(request):
-    if request == "RANDOM_WORD":
+    if request.startswith("RANDOM_WORD"):
         response = get_word()
     else:
         response = "Failed request"
@@ -54,9 +49,13 @@ def main():
             write_response(response)
             # update the last processed request
             last_processed_request = request
+            # with the unique id
             print(f"Processed request: {request}")
+            # wipe the request file after processing
+            open('request.txt', 'w').close()
         time.sleep(1)
 
 
 if __name__ == "__main__":
     main()
+

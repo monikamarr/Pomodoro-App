@@ -1,5 +1,9 @@
 import time
 import os
+# uuid basically makes sure that each request will have unique process id
+# you can read about it here:
+# https://docs.python.org/3/library/uuid.html
+import uuid
 
 
 def make_request(request):
@@ -19,11 +23,18 @@ def read_response():
 
 
 if __name__ == "__main__":
-    # Basic tests
-    make_request("RANDOM_WORD")
+    # clearing response.txt before making a request, making space for new word
+    open('response.txt', 'w').close()
+    # make a request with a unique identifier
+    request_id = str(uuid.uuid4())
+
+    make_request(f"RANDOM_WORD_{request_id}")
+    # Read the response
     random_word = read_response()
     print("Generated word:", random_word)
     if len(random_word) == 5:
         print("Length OK :)")
     else:
         print("Length not valid! :(")
+    # wipe response.txt for the next iteration
+    open('response.txt', 'w').close()
