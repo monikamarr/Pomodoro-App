@@ -1,4 +1,4 @@
-![Alt Text]([https://media.giphy.com/media/your-gif-link.gif](https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExb3R3cjRma2tqdjVmZjB6amU5a3M1bHlvNGtmNHVpa2hreHNnb3A2cyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/tHd9hYitHFY4bnh9RN/giphy.gif))
+![App Functionality](https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExb3R3cjRma2tqdjVmZjB6amU5a3M1bHlvNGtmNHVpa2hreHNnb3A2cyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/tHd9hYitHFY4bnh9RN/giphy.gif)
 
 # App Overview
 The Pomodoro app is designed to boost productivity by managing work and rest periods through a customizable timer. The app is built using a microservices architecture, where each service is responsible for a specific aspect of the app's functionality. 
