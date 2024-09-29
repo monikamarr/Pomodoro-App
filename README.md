@@ -38,7 +38,7 @@ pip install pyzmq
    First, clone this repository to your local machine:
 
    ```bash
-   git clone https://github.com/yourusername/pomodoro-app.git
+   git clone https://github.com/monikamarr/Pomodoro-App.git
    cd pomodoro-app
 
 
